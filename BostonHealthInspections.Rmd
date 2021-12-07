@@ -1,0 +1,129 @@
+---
+title: "Breadown of Boston's Health Inspections"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidytext )
+library(leaflet)
+library(tools)
+library(formattable)
+library(htmltools)
+```
+
+```{r}
+food_inspections <- read_csv("Food.Inspections.Records.csv")
+yelp_inspection <- read_csv("Food.Inspections.Yelp.Restaurant.csv")
+```
+
+```{r}
+#select relevant columns and lowercase them 
+food_inspections <- food_inspections %>%
+  select(businessname, descript, result, viollevel, violstatus) %>%
+  mutate(businessname = tolower(businessname))
+
+yelp_inspection <- yelp_inspection %>%
+  filter(Food.Inspection == 1 & Yelp == 1) %>%
+  select(Restaurant.Name, Inspection.Fail.Count, Inspection.Pass.Count, Violation.Pass.Count, Violation.Fail.Count, Price, ave_rating, lon, lat, Address, Violation.2020.Count) %>%
+  mutate(Restaurant.Name = tolower(Restaurant.Name))
+```
+
+```{r}
+yelp_inspection[yelp_inspection == "100% delicias"] <- "100 percent delicia food"
+```
+
+```{r}
+#join
+yelp_inspection <- yelp_inspection %>%
+  rename(businessname = Restaurant.Name)
+
+inspection <- food_inspections %>%
+  right_join(yelp_inspection, by = "businessname")
+``` 
+
+```{r}
+#create counts
+inspection_m <- inspection %>%
+  mutate(total_inspection = Inspection.Fail.Count + Inspection.Pass.Count) %>%
+  mutate(total_violations = Violation.Fail.Count + Violation.Pass.Count) 
+#create percentages
+inspection <- inspection_m %>%
+  mutate(percent_inspections_passed = Inspection.Pass.Count / total_inspection) %>%
+  mutate(percent_violations_passed = Violation.Pass.Count / total_violations)
+```
+
+```{r}
+#mutated column values 
+filtered_inspection <- inspection %>%
+  filter(!duplicated(businessname)) 
+
+filtered_inspection <- filtered_inspection %>%
+  mutate(businessname = toTitleCase(businessname)) %>%
+  mutate(percent_inspections_passed = percent(percent_inspections_passed)) %>%
+  mutate(percent_violations_passed = percent(percent_violations_passed)) 
+```
+
+```{r}
+#remove NA values 
+filtered_inspection[filtered_inspection == "no value"] <- "N/A"
+```
+
+
+```{r}
+#setting color palette
+bins <- c(0,5,15,60)
+pal <- colorBin(c("#d7191c","#d7d419","#6bd719"), domain = filtered_inspection$Violation.2020.Count, bins = bins)
+pal_rev <- colorBin(c("#d7191c","#d7d419","#6bd719"), domain = filtered_inspection$Violation.2020.Count, bins = bins, reverse = TRUE)
+```
+
+```{r}
+#initalizing data in leaflet map 
+boston_map <- leaflet(data = filtered_inspection)
+```
+```{r}
+#Creating actual map 
+boston_map %>%
+  addProviderTiles("CartoDB.Positron") %>% 
+  setView(lng = -71.057083, lat = 42.301, zoom = 12) %>%
+  addCircleMarkers(
+    lng = ~lon,
+    lat = ~lat, 
+    fillColor = ~pal(Violation.2020.Count),
+    color = "white",
+    fillOpacity = 1,
+    labelOptions = labelOptions(noHide = FALSE),
+    popup = paste0( '<p><strong>', filtered_inspection$businessname, '</strong> <p/>', 
+          "<strong> Percent of Inspections Passed: </strong>", 
+          filtered_inspection$percent_inspections_passed, '<br/>',
+          "<strong> Percent of Health Codes Passed: </strong>", 
+          filtered_inspection$percent_violations_passed, '<br/>',
+          "<strong> Average Yelp Rating: </strong>", 
+          filtered_inspection$ave_rating, '<br/>',
+          "<strong> Price: </strong>", filtered_inspection$Price) ) %>%
+  
+  # add legend
+  addLegend(
+    "bottomright", pal = pal_rev, values = ~Violation.2020.Count,
+    title = "Number of Health Code Violations in 2020",
+    opacity = 0.7,
+    labels = labels
+  )
+  
+```
+
+
+
+
+
+
+
+
+
